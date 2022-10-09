@@ -1,1 +1,2 @@
-mod game_setup;
+pub mod board;
+pub mod board_options;

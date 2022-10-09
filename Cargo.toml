@@ -12,6 +12,7 @@ colored = { version = "2.0" }
 bevy-inspector-egui = { version = "0.13.0", optional = true }
 itertools = "0.10.5"
 nanorand = "0.7.0"
+serde = { version = "1.0.145", features = ["derive"] }
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]

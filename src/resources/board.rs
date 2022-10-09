@@ -4,10 +4,26 @@ use std::{
     ops::DerefMut,
 };
 
-use bevy::{math::ivec2, prelude::IVec2};
+use bevy::prelude::{IVec2, UVec2};
 use colored::Colorize;
 use itertools::Itertools;
 use nanorand::{tls_rng, Rng};
+
+use super::board_options::{BoardOptions, Difficulty};
+
+#[must_use]
+fn bound_check(coord: IVec2, dim: IVec2) -> bool {
+    coord.cmpge(IVec2::ZERO).all() && coord.cmplt(dim).all()
+}
+
+fn bound_check_assert(coord: IVec2, dim: IVec2) {
+    assert!(
+        bound_check(coord, dim),
+        "Coordinate {:?} must be bound between [0, 0] and {:?}",
+        coord.to_array(),
+        dim.to_array()
+    );
+}
 
 #[derive(Debug, Clone)]
 pub struct TileMap {
@@ -17,7 +33,7 @@ pub struct TileMap {
     dim: IVec2,
 
     // number of adjacent mines, negative if the tile itself is a mine
-    tiles: Vec<i8>,
+    tiles: Box<[i8]>,
 }
 
 impl TileMap {
@@ -25,7 +41,7 @@ impl TileMap {
         Self {
             n_mines: 0,
             dim: IVec2::new(width.try_into().unwrap(), height.try_into().unwrap()),
-            tiles: vec![0; (width * height) as usize],
+            tiles: vec![0; (width * height) as usize].into_boxed_slice(),
         }
     }
 
@@ -35,7 +51,24 @@ impl TileMap {
         board.tiles[..n_mines as usize].fill(-1);
         rng.shuffle(&mut board.tiles);
 
-        todo!()
+        board
+            .all_tiles()
+            .filter(|tile| !tile.is_mine())
+            .for_each(|tile| {
+                let adj_mines = tile.neighbors().filter(|tile| tile.is_mine()).count();
+                tile.tile_state().set(adj_mines as i8);
+            });
+
+        board
+    }
+
+    pub fn from_options(options: &BoardOptions) -> Self {
+        let Difficulty {
+            dim: UVec2 { x, y },
+            n_mines,
+        } = options.difficulty;
+
+        Self::random(x, y, n_mines)
     }
 
     pub fn width(&self) -> u32 {
@@ -46,45 +79,65 @@ impl TileMap {
         self.dim.y as u32
     }
 
+    pub fn dim(&self) -> IVec2 {
+        self.dim
+    }
+
     pub fn n_mines(&self) -> u32 {
         self.n_mines
     }
 
     fn tile_state(&self, coord: IVec2) -> i8 {
-        let [width, height] = self.dim.to_array();
+        let width = self.dim.x;
 
-        self.bound_check_assert(coord);
+        bound_check_assert(coord, self.dim);
 
         let idx = coord.y * width + coord.x;
         self.tiles[idx as usize]
     }
 
-    #[must_use]
-    fn bound_check(&self, coord: IVec2) -> bool {
-        coord.cmpge(IVec2::ZERO).all() && coord.cmplt(self.dim).all()
-    }
-
-    fn bound_check_assert(&self, coord: IVec2) {
-        assert!(
-            self.bound_check(coord),
-            "Coordinate {:?} must be bound between [0, 0] and {:?}",
-            coord.to_array(),
-            self.dim.to_array()
-        );
-    }
-
-    pub fn get<T: Into<IVec2>>(&mut self, coord: T) -> TileView<'_> {
-        fn view(inner: &mut TileMap, coord: IVec2) -> TileView<'_> {
-            inner.bound_check_assert(coord);
-            TileView {
+    pub fn get_tile<T: Into<IVec2>>(&mut self, coord: T) -> Option<TileView> {
+        fn get_tile(inner: &mut TileMap, coord: IVec2) -> Option<TileView> {
+            bound_check(coord, inner.dim).then(|| TileView {
                 coord,
                 n_mines: inner.n_mines,
                 dim: inner.dim,
                 tiles: Cell::from_mut(inner.tiles.deref_mut()).as_slice_of_cells(),
-            }
+            })
         }
 
-        view(self, coord.into())
+        get_tile(self, coord.into())
+    }
+
+    pub fn tile<T: Into<IVec2>>(&mut self, coord: T) -> TileView {
+        self.get_tile(coord).unwrap()
+    }
+
+    pub fn get_tiles<T: Into<IVec2>>(
+        &mut self,
+        coords: impl Iterator<Item = T>,
+    ) -> impl Iterator<Item = Option<TileView<'_>>> {
+        let tiles = Cell::from_mut(self.tiles.deref_mut()).as_slice_of_cells();
+        coords.map_into().map(|coord| {
+            bound_check(coord, self.dim).then_some(TileView {
+                coord,
+                n_mines: self.n_mines,
+                dim: self.dim,
+                tiles,
+            })
+        })
+    }
+
+    pub fn coords(&self) -> impl Iterator<Item = IVec2> {
+        let [width, height] = self.dim.to_array();
+        (0..height)
+            .cartesian_product(0..width)
+            .map(|(y, x)| (x, y).into())
+    }
+
+    pub fn all_tiles(&mut self) -> impl Iterator<Item = TileView<'_>> {
+        let coords = self.coords();
+        self.get_tiles(coords).map(Option::unwrap)
     }
 }
 
@@ -107,33 +160,26 @@ pub enum TileState {
 }
 
 impl<'a> TileView<'a> {
-    fn tile_state(&self, coord: IVec2) -> &Cell<i8> {
-        let [width, height] = self.dim.to_array();
+    fn tile_state(&self) -> &Cell<i8> {
+        let width = self.dim.x;
 
-        self.bound_check_assert(coord);
-
-        let idx = coord.y * width + coord.x;
+        let idx = self.coord.y * width + self.coord.x;
         &self.tiles[idx as usize]
     }
 
-    #[must_use]
-    fn bound_check(&self, coord: IVec2) -> bool {
-        coord.cmpge(IVec2::ZERO).all() && coord.cmplt(self.dim).all()
-    }
-
-    fn bound_check_assert(&self, coord: IVec2) {
-        assert!(
-            self.bound_check(coord),
-            "Coordinate {:?} must be bound between [0, 0] and {:?}",
-            coord.to_array(),
-            self.dim.to_array()
-        );
-    }
-
     pub fn state(&self) -> TileState {
-        match self.tile_state(self.coord).get() {
+        match self.tile_state().get() {
             n if n < 0 => TileState::Mine,
             n => TileState::Clear(n as u8),
+        }
+    }
+
+    pub fn set_state(&self, state: TileState) {
+        let tile = self.tile_state();
+
+        match state {
+            TileState::Mine => tile.set(-1),
+            TileState::Clear(n) => tile.set(n as i8),
         }
     }
 
@@ -141,13 +187,17 @@ impl<'a> TileView<'a> {
         self.state() == TileState::Mine
     }
 
-    pub fn coordinate(&self) -> IVec2 {
+    pub fn coord(&self) -> IVec2 {
         self.coord
+    }
+
+    pub fn dim(&self) -> IVec2 {
+        self.dim
     }
 
     pub fn with_coordinate<T: Into<IVec2>>(self, coord: T) -> Self {
         fn with_coordinate(mut this: TileView, coord: IVec2) -> TileView {
-            this.bound_check_assert(coord);
+            bound_check_assert(coord, this.dim);
 
             this.coord = coord;
             this
@@ -158,7 +208,7 @@ impl<'a> TileView<'a> {
 
     pub fn try_with_coordinate<T: Into<IVec2>>(self, coord: T) -> Option<Self> {
         fn try_with_coordinate(mut this: TileView, coord: IVec2) -> Option<TileView> {
-            this.bound_check(coord).then(|| {
+            bound_check(coord, this.dim).then(|| {
                 this.coord = coord;
                 this
             })
@@ -186,7 +236,7 @@ impl<'a> TileView<'a> {
 
         NEIGHBORS.into_iter().filter_map(move |delta| {
             let coord = self.coord + IVec2::from(delta);
-            self.bound_check(coord).then(|| self.with_coordinate(coord))
+            bound_check(coord, self.dim).then(|| self.with_coordinate(coord))
         })
     }
 }
@@ -205,7 +255,7 @@ impl Display for TileMap {
                     .tiles
                     .chunks(self.inner.width() as usize)
                     .for_each(|row| {
-                        let fmt = row.iter().format_with("", |&tile, f| {
+                        let fmt = row.iter().format_with(" ", |&tile, f| {
                             f(&format_args!(
                                 "{}",
                                 match tile {
@@ -218,7 +268,7 @@ impl Display for TileMap {
                                 }
                             ))
                         });
-                        builder.entry(&format_args!("{}", fmt));
+                        builder.entry(&format_args!("| {} |", fmt));
                     });
 
                 builder.finish()
@@ -243,7 +293,7 @@ mod test {
     fn test_neighbors() {
         let mut tiles = TileMap::empty(8, 8);
 
-        let tile = tiles.get([1, 1]);
+        let tile = tiles.tile([1, 1]);
         let actual = tile
             .neighbors()
             .map(|tile| tile.coord.to_array())
@@ -265,5 +315,11 @@ mod test {
         .collect_vec();
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_random() {
+        let board = TileMap::random(30, 16, 99);
+        println!("{:#}", board);
     }
 }

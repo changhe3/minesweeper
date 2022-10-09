@@ -2198,6 +2198,7 @@ dependencies = [
  "colored",
  "itertools",
  "nanorand",
+ "serde",
  "tap",
 ]
 
