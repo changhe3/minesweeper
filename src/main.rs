@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use bevy_inspector_egui::WorldInspectorPlugin;
+use components::InspectablePlugin;
 use plugins::BoardPlugin;
 use resources::board_options::BoardOptions;
 use tap::Tap;
@@ -33,9 +34,10 @@ fn main() {
             #[cfg(feature = "debug")]
             app.add_plugin(WorldInspectorPlugin::new());
         })
+        .add_startup_system(camera_setup)
         .insert_resource(BoardOptions::default())
         .add_plugin(BoardPlugin)
-        .add_startup_system(camera_setup)
+        .add_plugin(InspectablePlugin)
         .run();
 }
 
