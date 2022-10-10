@@ -1,7 +1,6 @@
 use bevy::{
-    math::{uvec2, vec3},
-    prelude::{IVec2, Res, UVec2, Vec2, Vec3},
-    window::Window,
+    math::uvec2,
+    prelude::{UVec2, Vec2, Vec3},
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +30,7 @@ pub struct Difficulty {
     pub n_mines: u32,
 }
 
+#[allow(unused)]
 impl Difficulty {
     pub const EASY: Self = Self {
         dim: uvec2(9, 9),
@@ -118,7 +118,7 @@ impl Default for BoardOptions {
             difficulty: Difficulty::MEDIUM,
             position: Default::default(),
             tile_size: Default::default(),
-            tile_padding: 0.,
+            tile_padding: 3.0,
             safe_start: true,
         }
     }
